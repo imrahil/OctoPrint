@@ -16,7 +16,13 @@ import sys, os
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-#sys.path.insert(0, os.path.abspath('.'))
+sys.path.insert(0, os.path.abspath('../src/'))
+
+import octoprint._version
+from datetime import date
+
+year_since = 2013
+year_current = date.today().year
 
 # -- General configuration -----------------------------------------------------
 
@@ -25,7 +31,7 @@ import sys, os
 
 # Add any Sphinx extension module names here, as strings. They can be extensions
 # coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
-extensions = ['sphinx.ext.todo', 'sphinxcontrib.httpdomain']
+extensions = ['sphinx.ext.todo', 'sphinx.ext.autodoc', 'sphinxcontrib.httpdomain']
 todo_include_todos = True
 
 # Add any paths that contain templates here, relative to this directory.
@@ -42,14 +48,14 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'OctoPrint'
-copyright = u'2013, Gina Häußge'
+copyright = u'%d-%d, Gina Häußge' % (year_since, year_current) if year_current > year_since else u'%d, Gina Häußge' % year_since
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
 # built documents.
 #
 # The short X.Y version.
-version = open("../VERSION").read().strip()
+version = octoprint._version.get_versions()["version"]
 # The full version, including alpha/beta/rc tags.
 release = version
 
