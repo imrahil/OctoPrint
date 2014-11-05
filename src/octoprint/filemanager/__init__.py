@@ -89,6 +89,10 @@ def get_file_type(filename):
 	return get_path_for_extension(extension)
 
 
+class NoSuchStorage(Exception):
+	pass
+
+
 class FileManager(object):
 	def __init__(self, analysis_queue, slicing_manager, initial_storage_managers=None):
 		self._logger = logging.getLogger(__name__)
@@ -187,9 +191,20 @@ class FileManager(object):
 			finally:
 				os.remove(tmp_path)
 
+				source_job_key = (source_location, source_path)
+				dest_job_key = (dest_location, dest_path)
+
+				with self._slicing_jobs_mutex:
+					if source_job_key in self._slicing_jobs:
+						del self._slicing_jobs[source_job_key]
+					if dest_job_key in self._slicing_jobs:
+						del self._slicing_jobs[dest_job_key]
+
+		slicer = self._slicing_manager.get_slicer(slicer_name)
+
 		import time
 		start_time = time.time()
-		eventManager().fire(Events.SLICING_STARTED, {"stl": source_path, "gcode": dest_path})
+		eventManager().fire(Events.SLICING_STARTED, {"stl": source_path, "gcode": dest_path, "progressAvailable": slicer.get_slicer_properties()["progress_report"] if slicer else False})
 
 		import tempfile
 		f = tempfile.NamedTemporaryFile(suffix=".gco", delete=False)
@@ -197,13 +212,15 @@ class FileManager(object):
 		f.close()
 
 		with self._slicing_jobs_mutex:
-			if dest_location in self._slicing_jobs:
-				job_slicer_name, job_absolute_source_path, job_temp_path = self._slicing_jobs[dest_location]
+			source_job_key = (source_location, source_path)
+			dest_job_key = (dest_location, dest_path)
+			if dest_job_key in self._slicing_jobs:
+				job_slicer_name, job_absolute_source_path, job_temp_path = self._slicing_jobs[dest_job_key]
 
 				self._slicing_manager.cancel_slicing(job_slicer_name, job_absolute_source_path, job_temp_path)
-				del self._slicing_jobs[dest_location]
+				del self._slicing_jobs[dest_job_key]
 
-			self._slicing_jobs[dest_location] = (slicer_name, absolute_source_path, temp_path)
+			self._slicing_jobs[dest_job_key] = self._slicing_jobs[source_job_key] = (slicer_name, absolute_source_path, temp_path)
 
 		args = (source_location, source_path, temp_path, dest_location, dest_path, start_time, callback, callback_args)
 		return self._slicing_manager.slice(
@@ -229,7 +246,10 @@ class FileManager(object):
 
 		for callback in self._slicing_progress_callbacks:
 			try: callback.sendSlicingProgress(slicer, source_location, source_path, dest_location, dest_path, progress_int)
-			except: pass
+			except: self._logger.exception("Exception while pushing slicing progress")
+
+	def get_busy_files(self):
+		return self._slicing_jobs.keys()
 
 	def file_exists(self, destination, path):
 		return self._storage(destination).file_exists(path)
@@ -248,10 +268,11 @@ class FileManager(object):
 	def add_file(self, destination, path, file_object, links=None, allow_overwrite=False):
 		file_path = self._storage(destination).add_file(path, file_object, links=links, allow_overwrite=allow_overwrite)
 		absolute_path = self._storage(destination).get_absolute_path(file_path)
-		file_type = get_file_type(file_path[-1])
 
-		queue_entry = QueueEntry(file_path, file_type, destination, absolute_path)
-		self._analysis_queue.enqueue(queue_entry, high_priority=True)
+		file_type = get_file_type(absolute_path)
+		if file_type:
+			queue_entry = QueueEntry(file_path, file_type[-1], destination, absolute_path)
+			self._analysis_queue.enqueue(queue_entry, high_priority=True)
 
 		eventManager().fire(Events.UPDATED_FILES, dict(type="printables"))
 		return file_path
@@ -279,7 +300,11 @@ class FileManager(object):
 		self._storage(destination).remove_link(path, rel, data)
 
 	def log_print(self, destination, path, timestamp, print_time, success):
-		self._storage(destination).add_history(path, dict(timestamp=timestamp, printTime=print_time, success=success))
+		try:
+			self._storage(destination).add_history(path, dict(timestamp=timestamp, printTime=print_time, success=success))
+		except NoSuchStorage:
+			# if there's no storage configured where to log the print, we'll just not log it
+			pass
 
 	def set_additional_metadata(self, destination, path, key, data, overwrite=False, merge=False):
 		self._storage(destination).set_additional_metadata(path, key, data, overwrite=overwrite, merge=merge)
@@ -310,7 +335,7 @@ class FileManager(object):
 
 	def _storage(self, destination):
 		if not destination in self._storage_managers:
-			raise RuntimeError("No storage configured for destination {destination}".format(**locals()))
+			raise NoSuchStorage("No storage configured for destination {destination}".format(**locals()))
 		return self._storage_managers[destination]
 
 	def _on_analysis_finished(self, entry, result):

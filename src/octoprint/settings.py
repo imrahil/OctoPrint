@@ -41,6 +41,7 @@ default_settings = {
 		"host": "0.0.0.0",
 		"port": 5000,
 		"firstRun": True,
+		"secretKey": None,
 		"reverseProxy": {
 			"prefixHeader": "X-Script-Name",
 			"schemeHeader": "X-Scheme",
@@ -129,6 +130,7 @@ default_settings = {
 	},
 	"accessControl": {
 		"enabled": True,
+		"salt": None,
 		"userManager": "octoprint.users.FilebasedUserManager",
 		"userfile": None,
 		"autologinLocal": False,
@@ -170,6 +172,7 @@ default_settings = {
 			"includeCurrentToolInTemps": True,
 			"hasBed": True,
 			"repetierStyleTargetTemperature": False,
+			"smoothieTemperatureReporting": False,
 			"extendedSdFileList": False
 		}
 	}
