@@ -96,6 +96,26 @@ class CleanCommand(Command):
 			file_handler=delete_file
 		)
 
+		# pyc files
+		def delete_folder_if_empty(path, applied_handler):
+			if not applied_handler:
+				return
+			if len(os.listdir(path)) == 0:
+				shutil.rmtree(path)
+				print "Deleted %s since it was empty" % path
+
+		def delete_file(path):
+			os.remove(path)
+			print "Deleted %s" % path
+
+		import fnmatch
+		_recursively_handle_files(
+			os.path.abspath("src"),
+			lambda name: fnmatch.fnmatch(name.lower(), "*.pyc"),
+			folder_handler=delete_folder_if_empty,
+			file_handler=delete_file
+		)
+
 
 class NewTranslation(Command):
 	description = "create a new translation"
@@ -174,7 +194,7 @@ class RefreshTranslation(Command):
 		self.babel_extract_messages.copyright_holder = "The OctoPrint Project"
 		self.babel_extract_messages.finalize_options()
 
-		self.babel_update_messages.input_file = I18N_MAPPING_FILE
+		self.babel_update_messages.input_file = I18N_POT_FILE
 		self.babel_update_messages.output_dir = I18N_OUTPUT_DIR_PY
 		self.babel_update_messages.locale = self.locale
 
@@ -263,7 +283,7 @@ def params():
 
 	packages = find_packages(where="src")
 	package_dir = {"octoprint": "src/octoprint"}
-	package_data = {"octoprint": package_data_dirs('src/octoprint', ['static', 'templates', 'plugins'])}
+	package_data = {"octoprint": package_data_dirs('src/octoprint', ['static', 'templates', 'plugins', 'translations'])}
 
 	include_package_data = True
 	zip_safe = False

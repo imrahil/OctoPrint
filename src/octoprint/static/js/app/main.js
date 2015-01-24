@@ -67,16 +67,17 @@ $(function() {
 
         //~~ Initialize view models
         var loginStateViewModel = new LoginStateViewModel();
+        var printerProfilesViewModel = new PrinterProfilesViewModel();
         var usersViewModel = new UsersViewModel(loginStateViewModel);
-        var settingsViewModel = new SettingsViewModel(loginStateViewModel, usersViewModel);
-        var connectionViewModel = new ConnectionViewModel(loginStateViewModel, settingsViewModel);
         var timelapseViewModel = new TimelapseViewModel(loginStateViewModel);
         var printerStateViewModel = new PrinterStateViewModel(loginStateViewModel, timelapseViewModel);
-        var appearanceViewModel = new AppearanceViewModel(settingsViewModel);
+        var settingsViewModel = new SettingsViewModel(loginStateViewModel, usersViewModel, printerProfilesViewModel);
+        var connectionViewModel = new ConnectionViewModel(loginStateViewModel, settingsViewModel, printerProfilesViewModel);
+        var appearanceViewModel = new AppearanceViewModel(settingsViewModel, printerStateViewModel);
         var temperatureViewModel = new TemperatureViewModel(loginStateViewModel, settingsViewModel);
         var controlViewModel = new ControlViewModel(loginStateViewModel, settingsViewModel);
         var terminalViewModel = new TerminalViewModel(loginStateViewModel, settingsViewModel);
-        var slicingViewModel = new SlicingViewModel(loginStateViewModel);
+        var slicingViewModel = new SlicingViewModel(loginStateViewModel, printerProfilesViewModel);
         var gcodeFilesViewModel = new GcodeFilesViewModel(printerStateViewModel, loginStateViewModel, slicingViewModel);
         var gcodeViewModel = new GcodeViewModel(loginStateViewModel, settingsViewModel);
         var navigationViewModel = new NavigationViewModel(loginStateViewModel, appearanceViewModel, settingsViewModel, usersViewModel);
@@ -84,6 +85,7 @@ $(function() {
 
         var viewModelMap = {
             loginStateViewModel: loginStateViewModel,
+            printerProfilesViewModel: printerProfilesViewModel,
             usersViewModel: usersViewModel,
             settingsViewModel: settingsViewModel,
             connectionViewModel: connectionViewModel,
@@ -365,6 +367,7 @@ $(function() {
                 return { controlsDescendantBindings: !valueAccessor() };
             }
         };
+        ko.virtualElements.allowedBindings.allowBindings = true;
 
         ko.bindingHandlers.slimScrolledForeach = {
             init: function(element, valueAccessor, allBindings, viewModel, bindingContext) {
@@ -378,6 +381,31 @@ $(function() {
             }
         };
 
+        ko.bindingHandlers.qrcode = {
+            update: function(element, valueAccessor, allBindings, viewModel, bindingContext) {
+                var val = ko.utils.unwrapObservable(valueAccessor());
+
+                var defaultOptions = {
+                    text: "",
+                    size: 200,
+                    fill: "#000",
+                    background: null,
+                    label: "",
+                    fontname: "sans",
+                    fontcolor: "#000",
+                    radius: 0,
+                    ecLevel: "L"
+                };
+
+                var options = {};
+                _.each(defaultOptions, function(value, key) {
+                    options[key] = ko.utils.unwrapObservable(val[key]) || value;
+                });
+
+                $(element).empty().qrcode(options);
+            }
+        };
+
         ko.bindingHandlers.invisible = {
             init: function(element, valueAccessor, allBindings, viewModel, bindingContext) {
                 if (!valueAccessor()) return;
@@ -387,12 +415,34 @@ $(function() {
             }
         };
 
+        //~~ startup commands
+
+        _.each(allViewModels, function(viewModel) {
+            if (viewModel.hasOwnProperty("onStartup")) {
+                viewModel.onStartup();
+            }
+        });
+
+        loginStateViewModel.subscribe(function(change, data) {
+            if ("login" == change) {
+                $("#gcode_upload").fileupload("enable");
+
+                if (data.admin) {
+                    usersViewModel.requestData();
+                }
+            } else {
+                $("#gcode_upload").fileupload("disable");
+            }
+        });
+
+        //~~ view model binding
+
         settingsViewModel.requestData(function() {
             ko.applyBindings(settingsViewModel, document.getElementById("settings_dialog"));
 
-            ko.applyBindings(connectionViewModel, document.getElementById("connection_accordion"));
-            ko.applyBindings(printerStateViewModel, document.getElementById("state_accordion"));
-            ko.applyBindings(gcodeFilesViewModel, document.getElementById("files_accordion"));
+            ko.applyBindings(connectionViewModel, document.getElementById("connection_wrapper"));
+            ko.applyBindings(printerStateViewModel, document.getElementById("state_wrapper"));
+            ko.applyBindings(gcodeFilesViewModel, document.getElementById("files_wrapper"));
             ko.applyBindings(temperatureViewModel, document.getElementById("temp"));
             ko.applyBindings(controlViewModel, document.getElementById("control"));
             ko.applyBindings(terminalViewModel, document.getElementById("term"));
@@ -416,37 +466,33 @@ $(function() {
 
             // apply bindings and signal startup
             _.each(additionalViewModels, function(additionalViewModel) {
-                if (additionalViewModel[0].hasOwnProperty("onBeforeBinding")) {
-                    additionalViewModel[0].onBeforeBinding();
+                var viewModel = additionalViewModel[0];
+                var targets = additionalViewModel[1];
+
+                if (targets === undefined) {
+                    return;
                 }
 
-                // model instance, target container
-                ko.applyBindings(additionalViewModel[0], additionalViewModel[1]);
+                if (!Array.isArray(targets)) {
+                    targets = [targets];
+                }
 
-                if (additionalViewModel[0].hasOwnProperty("onAfterBinding")) {
-                    additionalViewModel[0].onAfterBinding();
+                if (viewModel.hasOwnProperty("onBeforeBinding")) {
+                    viewModel.onBeforeBinding();
+                }
+
+                _.each(targets, function(target) {
+                    try {
+                        ko.applyBindings(viewModel, target);
+                    } catch (exc) {
+                        console.log("Could not apply bindings for additional view model " + viewModel + ": " + exc.message);
+                    }
+                });
+
+                if (viewModel.hasOwnProperty("onAfterBinding")) {
+                    viewModel.onAfterBinding();
                 }
             });
-        });
-
-        //~~ startup commands
-
-        _.each(allViewModels, function(viewModel) {
-            if (viewModel.hasOwnProperty("onStartup")) {
-                viewModel.onStartup();
-            }
-        });
-
-        loginStateViewModel.subscribe(function(change, data) {
-            if ("login" == change) {
-                $("#gcode_upload").fileupload("enable");
-
-                if (data.admin) {
-                    usersViewModel.requestData();
-                }
-            } else {
-                $("#gcode_upload").fileupload("disable");
-            }
         });
 
         //~~ UI stuff
@@ -480,14 +526,14 @@ $(function() {
             }
         });
 
-        $(".accordion-toggle[href='#files']").click(function() {
+        $(".accordion-toggle[data-target='#files']").click(function() {
             var files = $("#files");
             if (files.hasClass("in")) {
                 files.removeClass("overflow_visible");
             } else {
                 setTimeout(function() {
                     files.addClass("overflow_visible");
-                }, 1000);
+                }, 100);
             }
         });
 

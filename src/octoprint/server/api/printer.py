@@ -6,6 +6,7 @@ __license__ = 'GNU Affero General Public License http://www.gnu.org/licenses/agp
 __copyright__ = "Copyright (C) 2014 The OctoPrint Project - Released under terms of the AGPLv3 License"
 
 from flask import request, jsonify, make_response, Response
+from flask.exceptions import JSONBadRequest
 import re
 
 from octoprint.settings import settings, valid_boolean_trues
@@ -300,24 +301,28 @@ def printerSdState():
 @api.route("/printer/command", methods=["POST"])
 @restricted_access
 def printerCommand():
-	# TODO: document me
 	if not printer.isOperational():
 		return make_response("Printer is not operational", 409)
 
 	if not "application/json" in request.headers["Content-Type"]:
 		return make_response("Expected content type JSON", 400)
 
-	data = request.json
+	try:
+		data = request.json
+	except JSONBadRequest:
+		return make_response("Malformed JSON body in request", 400)
 
-	parameters = {}
-	if "parameters" in data.keys():
-		parameters = data["parameters"]
+	parameters = dict()
+	if "parameters" in data.keys(): parameters = data["parameters"]
 
-	commands = []
-	if "command" in data.keys():
+	if "command" in data and "commands" in data:
+		return make_response("'command' and 'commands' are mutually exclusive", 400)
+	elif "command" in data:
 		commands = [data["command"]]
-	elif "commands" in data.keys():
+	elif "commands" in data and isinstance(data["commands"], (list, tuple)):
 		commands = data["commands"]
+	else:
+		return make_response("Need either single 'command' or list of 'commands'", 400)
 
 	commandsToSend = []
 	for command in commands:
